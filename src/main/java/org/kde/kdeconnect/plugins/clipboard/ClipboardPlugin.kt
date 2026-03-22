@@ -5,11 +5,9 @@
 */
 package org.kde.kdeconnect.plugins.clipboard
 
-import android.Manifest
 import android.app.Activity
 import android.content.ClipData
 import android.content.ClipboardManager
-import android.content.pm.PackageManager
 import android.os.Build
 import android.widget.Toast
 import androidx.annotation.VisibleForTesting
@@ -88,7 +86,7 @@ class ClipboardPlugin : Plugin() {
     override val outgoingPacketTypes: Array<String> = arrayOf(PACKET_TYPE_CLIPBOARD, PACKET_TYPE_CLIPBOARD_CONNECT)
 
     override fun getUiButtons(): List<PluginUiButton> {
-        return if (Build.VERSION.SDK_INT > Build.VERSION_CODES.P && canAccessLogs()) {
+        return if (Build.VERSION.SDK_INT > Build.VERSION_CODES.P && !ClipboardListener.canAutoSyncClipboard(context)) {
             listOf(PluginUiButton(context.getString(R.string.send_clipboard), R.drawable.ic_baseline_content_paste_24) { _: Activity? ->
                 userInitiatedSendClipboard()
             })
@@ -98,7 +96,7 @@ class ClipboardPlugin : Plugin() {
     }
 
     override fun getUiMenuEntries(): List<PluginUiMenuEntry> {
-        return if (Build.VERSION.SDK_INT > Build.VERSION_CODES.P && !canAccessLogs()) {
+        return if (Build.VERSION.SDK_INT > Build.VERSION_CODES.P && !ClipboardListener.canAutoSyncClipboard(context)) {
             listOf(PluginUiMenuEntry(context.getString(R.string.send_clipboard)) { _: Activity? ->
                 userInitiatedSendClipboard()
             })
@@ -118,10 +116,6 @@ class ClipboardPlugin : Plugin() {
                 Toast.makeText(this.context, R.string.pref_plugin_clipboard_sent, Toast.LENGTH_SHORT).show()
             }
         }
-    }
-
-    private fun canAccessLogs(): Boolean {
-        return ContextCompat.checkSelfPermission(context, Manifest.permission.READ_LOGS) == PackageManager.PERMISSION_DENIED
     }
 
     companion object {

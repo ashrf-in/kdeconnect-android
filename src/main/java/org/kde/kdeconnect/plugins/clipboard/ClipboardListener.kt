@@ -13,6 +13,7 @@ import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Handler
 import android.os.Looper
+import android.provider.Settings
 import androidx.core.content.ContextCompat
 import org.kde.kdeconnect.helpers.ThreadHelper.execute
 import org.kde.kdeconnect_tp.BuildConfig
@@ -30,20 +31,23 @@ class ClipboardListener {
     private val observers: HashSet<ClipboardObserver> = HashSet()
 
     private val context: Context
+    private val mainHandler = Handler(Looper.getMainLooper())
     var currentContent: String? = null
         private set
     var updateTimestamp: Long = 0
         private set
+    @Volatile
+    private var foregroundSyncPending = false
 
     private lateinit var cm: ClipboardManager
 
     private constructor(ctx: Context) {
         context = ctx.applicationContext
-        Handler(Looper.getMainLooper()).post {
+        mainHandler.post {
             cm = ContextCompat.getSystemService<ClipboardManager>(context, ClipboardManager::class.java)!!
             cm.addPrimaryClipChangedListener { this.onClipboardChanged() }
         }
-        if (Build.VERSION.SDK_INT > Build.VERSION_CODES.P && ContextCompat.checkSelfPermission(context, Manifest.permission.READ_LOGS) == PackageManager.PERMISSION_GRANTED) {
+        if (canAutoSyncClipboard(context)) {
             execute {
                 try {
                     val timeStamp = SimpleDateFormat("yyyy-MM-dd HH:mm:ss.SSS", Locale.US).format(Date())
@@ -53,7 +57,7 @@ class ClipboardListener {
                     val bufferedReader = BufferedReader(InputStreamReader(process.inputStream))
                     bufferedReader.forEachLine { line ->
                         if (line.contains(BuildConfig.APPLICATION_ID)) {
-                            context.startActivity(ClipboardFloatingActivity.getIntent(context, false))
+                            requestForegroundClipboardSync()
                         }
                     }
                 } catch (_: Exception) { }
@@ -70,9 +74,14 @@ class ClipboardListener {
     }
 
     fun onClipboardChanged() {
+        if (!this::cm.isInitialized) {
+            return
+        }
+
         try {
             val item = cm.primaryClip!!.getItemAt(0)
             val content = item.coerceToText(context).toString()
+            foregroundSyncPending = false
 
             if (content == currentContent) {
                 return
@@ -84,21 +93,51 @@ class ClipboardListener {
                 observer.clipboardChanged(content)
             }
         } catch (_: Exception) {
-            //Probably clipboard was not text
+            // Probably clipboard was not text, or access is restricted on this Android version.
         }
     }
 
     @Suppress("deprecation")
     fun setText(text: String?) {
         if (this::cm.isInitialized) {
+            foregroundSyncPending = false
             updateTimestamp = System.currentTimeMillis()
             currentContent = text
             cm.text = text
         }
     }
 
+    private fun requestForegroundClipboardSync() {
+        if (!canAutoSyncClipboard(context) || foregroundSyncPending) {
+            return
+        }
+
+        foregroundSyncPending = true
+        mainHandler.post {
+            try {
+                context.startActivity(ClipboardFloatingActivity.getIntent(context, false))
+                mainHandler.postDelayed({ foregroundSyncPending = false }, FOREGROUND_SYNC_TIMEOUT_MS)
+            } catch (_: Exception) {
+                foregroundSyncPending = false
+            }
+        }
+    }
+
     companion object {
+        private const val FOREGROUND_SYNC_TIMEOUT_MS = 3_000L
         private var _instance: ClipboardListener? = null
+
+        @JvmStatic
+        fun canAutoSyncClipboard(context: Context): Boolean {
+            if (Build.VERSION.SDK_INT <= Build.VERSION_CODES.P) {
+                return true
+            }
+
+            val appContext = context.applicationContext
+            val hasReadLogs = ContextCompat.checkSelfPermission(appContext, Manifest.permission.READ_LOGS) == PackageManager.PERMISSION_GRANTED
+            val canDrawOverlays = Settings.canDrawOverlays(appContext)
+            return hasReadLogs && canDrawOverlays
+        }
 
         @JvmStatic
         fun instance(context: Context): ClipboardListener {

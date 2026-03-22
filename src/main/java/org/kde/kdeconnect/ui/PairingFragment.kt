@@ -7,11 +7,13 @@ package org.kde.kdeconnect.ui
 
 import android.Manifest
 import android.app.Activity
+import android.bluetooth.BluetoothAdapter
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
+import android.preference.PreferenceManager
 import android.provider.Settings
 import android.util.Log
 import android.view.LayoutInflater
@@ -117,11 +119,6 @@ class PairingFragment : BaseFragment<DevicesListBinding>() {
 
         headerText.setOnClickListener(null)
         headerText.setOnLongClickListener(null)
-
-
-        noWifiHeader.setOnClickListener {
-            startActivity(Intent(Settings.ACTION_WIFI_SETTINGS))
-        }
 
         noNotificationsHeader.setOnClickListener {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
@@ -293,6 +290,8 @@ class PairingFragment : BaseFragment<DevicesListBinding>() {
         binding.devicesList.removeHeaderView(notTrustedText)
         binding.devicesList.removeHeaderView(noNotificationsHeader)
 
+        val bluetoothDiscoveryAvailable = isBluetoothDiscoveryAvailable()
+
         if (someDevicesReachable || isConnectedToNonCellularNetwork) {
             if (!hasNotificationsPermission) {
                 binding.devicesList.addHeaderView(noNotificationsHeader)
@@ -301,9 +300,40 @@ class PairingFragment : BaseFragment<DevicesListBinding>() {
             } else {
                 binding.devicesList.addHeaderView(notTrustedText)
             }
+        } else if (bluetoothDiscoveryAvailable) {
+            noWifiHeader.text = getString(R.string.no_wifi_but_bluetooth_available)
+            noWifiHeader.setOnClickListener {
+                startActivity(Intent(Settings.ACTION_BLUETOOTH_SETTINGS))
+            }
+            binding.devicesList.addHeaderView(noWifiHeader)
         } else {
+            noWifiHeader.text = getString(R.string.no_wifi)
+            noWifiHeader.setOnClickListener {
+                startActivity(Intent(Settings.ACTION_WIFI_SETTINGS))
+            }
             binding.devicesList.addHeaderView(noWifiHeader)
         }
+    }
+
+    private fun isBluetoothDiscoveryAvailable(): Boolean {
+        val context = requireContext()
+        val bluetoothEnabledInApp = PreferenceManager.getDefaultSharedPreferences(context)
+            .getBoolean(SettingsFragment.KEY_BLUETOOTH_ENABLED, false)
+        if (!bluetoothEnabledInApp) {
+            return false
+        }
+
+        val bluetoothAdapter = BluetoothAdapter.getDefaultAdapter() ?: return false
+        if (!bluetoothAdapter.isEnabled) {
+            return false
+        }
+
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S) {
+            return true
+        }
+
+        return ContextCompat.checkSelfPermission(context, Manifest.permission.BLUETOOTH_CONNECT) == PackageManager.PERMISSION_GRANTED &&
+            ContextCompat.checkSelfPermission(context, Manifest.permission.BLUETOOTH_SCAN) == PackageManager.PERMISSION_GRANTED
     }
 
     override fun onStart() {
